@@ -1,0 +1,47 @@
+/**
+Serial Communication
+
+Sends a byte out the serial port when a key is pressed
+Used to control a midi apllication
+
+Elieviates the problem of openning a serial monitor for arduino shield
+Instead serial port is always open and reading keyboard activity
+
+Author Robert James Brennan, NUI Maynooth
+*/
+
+import processing.serial.*;
+
+Serial port;
+int whichkey = -1;
+int inByte = -1;
+
+void setup()
+{
+  size(400, 300);
+  PFont font = createFont(PFont.list()[2], 14);
+  textFont(font);
+  
+  
+  
+  port = new Serial(this, Serial.list()[0], 9600);
+}
+
+void draw()
+{
+  background(0);
+  text("Last received: " +inByte, 10, 130);
+  text("Last Sent: " +whichkey, 10, 100);
+}
+
+void serialEvent(Serial port)
+{
+  inByte = port.read();
+}
+
+
+void keyPressed(){
+  //Send keystrokes over serial
+  port.write(key);
+  whichkey = key;
+}

@@ -1,0 +1,106 @@
+/*
+Version 1 of keyboard midi control, basic functionality where a key pressed plays a note for a specific duration
+
+Author: Robert James Brennan, NUI Maynooth
+*/
+
+#include <SoftwareSerial.h>
+
+int led = 13;
+
+SoftwareSerial SSerial(2,3);
+
+#define NOTE_ON 0x90
+
+#define NOTE_OFF 0x80
+
+#define VELOCITY 20
+
+static uint16_t noteDuration = 150;
+
+#define QUEUE_SIZE 16
+static struct {
+  long endTime;
+  uint8_t note;
+}noteQueue[QUEUE_SIZE];
+static uint8_t qhead, qtail, qcount;
+
+unsigned char notes[] = {
+  0x0E, 0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17};
+  
+void turnNotesOff(void)
+{
+  while (qcount){
+    if (((long)millis() - noteQueue[qtail].endTime) >=0){
+      note_off(noteQueue[qtail++].note);
+      if(qtail >= QUEUE_SIZE) qtail =0;
+      qcount--;
+    }else return;
+  }
+}
+
+void note_on(uint8_t notenum, uint8_t velocity)
+{
+  SSerial.write(NOTE_ON);
+  SSerial.write(notenum);
+  SSerial.write(velocity);
+  //delay(20);
+  //note_off(notenum);
+}
+
+void note_off(unsigned char notenum)
+{
+  SSerial.write(NOTE_OFF);
+  SSerial.write(notenum);
+  SSerial.write(32);
+}
+
+static void enqueue(uint8_t note)
+{
+  if (note == 0)return;
+  
+  if(qcount < QUEUE_SIZE)
+  {
+    noteQueue[qhead].note = note;
+    noteQueue[qhead++].endTime = millis() + noteDuration;
+    note_on(note, VELOCITY);
+    if(qhead >= QUEUE_SIZE) qhead = 0;
+    qcount++;
+  }
+}
+
+long inactivityTimer;
+uint8_t activity;
+
+void setup()
+{
+  Serial.begin(9600);
+  
+  uint8_t i;
+  
+  SSerial.begin(31250);
+  
+  activity = 0;
+  
+  qhead = qtail = qcount = 0;
+  
+}
+
+void loop()
+{
+  uint8_t event;
+  
+  int val = 0;
+  
+  while(Serial.available() > 0)
+  {
+    val = Serial.read();
+    val = val - 48;
+    
+    unsigned char note = notes[val];
+    enqueue(note);
+    turnNotesOff();
+  }
+  
+  
+}

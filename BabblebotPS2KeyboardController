@@ -1,0 +1,548 @@
+/*
+Main program to control the babblebot/speakerjet chip
+
+All allophones are mapped to a specific key
+
+A set of external buttons will control pauses, pitches, spedd etc
+
+Author: Robert James Brennan, NUI Maynooth
+
+*/
+
+//create instance of Ginsing
+#include <GinSing.h>
+
+GinSing GS;
+//-------------------------
+//Create instance of PS2keyboard
+//------------------------------
+#include <PS2Keyboard.h>
+
+
+PS2Keyboard keyboard;
+
+//----------------------------
+//----Mark pins for GinSing---/
+//------------------------------
+
+#define rcvPin 4 //pin used for recording
+#define sndPin 3 //pin used for transmiting
+#define ovfPin 2 //pin used for overflow control
+
+GinSingVoice * voice = 0x0;//set voice mode interface
+
+//-----------------------------------
+//----Pins for PS2keyboard-------//
+//-----------------------------------
+
+
+const int DataPin = 8;
+const int IRQpin = 5;
+
+//------------------------------------
+//----Record/play/stop
+//------------------------------------
+
+enum {Record, Play , Stop};
+enum {BufferSize = 1024 , NoData = 0, EndPlayback = 1 };
+enum { PLY = 1, REC = 2};
+
+//---------------------------------------------
+//-----Include map for key to allophone here//
+//---------------------------------------------
+/*static byte key2allophone[256];
+static struct{
+  byte key;
+  byte allo;
+} allophones[] = {
+  { '1', _F },
+   { '2', _I },
+   { '3', _J },
+   { '4', _M },
+   { '5', _R },
+   { '6', _U },
+   { '7', _V },
+   { '8', _W },
+   { '9', _Y },
+   { '0', _Z },
+   { 'q', _AA },
+   { 'w', _AE },
+   { 'e', _AU },
+   { 'r', _BE },
+   { 't', _BO },
+   { 'y', _EB },
+   { 'u', _CH },
+   { 'i', _DE },
+   { 'o', _DO },
+   { 'p', _ED },
+   { 'a', _GE },
+   { 's', _GO },
+   { 'd', _HE },
+   { 'f', _HO },
+   { 'g', _IE },
+   { 'h', _KE },
+   { 'j', _KO },
+   { 'k', _OK },
+   { 'l', _LE },
+   { ';', _LO },
+   { 'z', _NGE },
+   { 'x', _OE },
+   { 'c', _OO },
+   { 'v', _OR },
+   { 'b', _PE },
+   { 'n', _PO },
+   { 'm', _SE },
+   { ',', _SH },
+   { '.', _T },
+   { '/', _TH },
+   { '[', _EE },
+   { ']', _ER },
+   { ' ' , _NE },
+   { '#', _NO },
+};
+#define ALLO_MAP_SIZE (sizeof(allophones)/sizeof(allophones[0]))*/  
+
+//-----Include map for key to pitch here//
+
+/*static byte key2pitch[256];
+static struct{
+  byte key;
+  GSNote pitch;
+} pitches[] = {
+  { '1', C_0 },
+  { '2', D_0 },
+  { '3', E_0 },
+  { '4', F_0 },
+  { '5', G_0 },
+  { '6', A_0 },
+  { '7', B_0 },
+  { '8', C_1 },
+  { '9', D_2 },
+  { '0', E_3 },
+};
+#define PITCH_MAP_SIZE (sizeof(pitches)/sizeof(pitches[0]))
+*/
+
+//-----------------------------------------//
+
+//Setup
+void setup()
+{
+  
+  
+  GS.begin (rcvPin, sndPin, ovfPin );
+  
+  voice = GS.getVoice();
+  
+  voice->begin();
+  
+  beginRec();
+  
+  setSpeed ( 150 );
+  setPitch ( C_0 );
+  
+  Serial.begin(9600); 
+  
+  keyboard.begin(DataPin, IRQpin, PS2Keymap_US);
+  
+  warmUpVoice();
+  
+  sayBabbleBoard();
+  
+  Serial.println("Speaking");
+  
+  /*for (int i=0; i<= ALLO_MAP_SIZE; i++)
+  {
+    key2allophone[allophones[i].key] = allophones[i].allo;
+  }
+  
+  /*
+  for (int i = 0; i<= PITCH_MAP_SIZE; i++)
+  {
+    key2pitch[pitches[i].key] = pitches[i].pitch;
+  }*/
+  
+  GS.end();
+    
+}
+
+//----------------------------------------------
+//Ginsing shield functions
+//----------------------------------------------
+int utter ( GSAllophone utterance )
+{
+  GSAllophone phrase[2] = { utterance, _ENDPHRASE };
+  
+  while ( !GS.isReady() );
+  voice->speak ( phrase );
+  
+  return( getDuration (utterance) );
+}
+//--------------------------
+//Set speaking speed (0-255)
+//--------------------------
+void setSpeed (byte val)
+{
+  float relVal = ((float) val / 255.0f );
+  float blendSpeed = 0.20f * relVal * relVal;
+  voice -> setBlendSpeed ( blendSpeed );
+}
+
+//----------------------------------
+//GinSing Speak Pre-Recorded Phrase
+//----------------------------------
+
+void speak ( void *phrase )
+{
+  GSAllophone * alloPtr = ( GSAllophone * ) phrase;
+  
+  while(*alloPtr != _ENDPHRASE ) {
+    utter( *alloPtr );
+    alloPtr++;
+  }
+}
+
+
+//---------------------------
+//Set the pitch of voice
+//---------------------------
+void setPitch (GSNote val)
+{
+  voice->setNote ( val );
+}
+
+static bool isReady () { return ( GS.isReady() ); }//Check if shield is ready for a command
+
+//---------------------------
+//Get the duration of an allophone
+//---------------------------
+
+
+static int getDuration ( GSAllophone utterance )
+{
+   GSAllophone phrase[2] = { utterance , _ENDPHRASE };
+
+     // value approximated based on empirical tests
+     
+   return ( (int) ( 1.6f * (float) GS.getVoice()->getMillis ( phrase ) ) );
+}
+
+
+void loop()
+{
+  
+  /*if(keyboard.available())
+  {
+    byte d = keyboard.read();
+    Serial.println(d);
+    byte c = key2allophone[d];
+    
+    Serial.println(c);
+  }*/
+  
+  
+  
+  if(keyboard.available())
+  {
+    byte button = keyboard.read();
+    
+    GSAllophone allo = key2allo(button);
+    
+    int bttnStatus = checkBttns();
+    
+    switch (bttnStatus) {
+      case 10 : setState (Record ); break;
+      case 11 : setState (Play   ); break;
+      
+      default:
+      {
+        if ( getState() == Record ) {
+          
+          ubyte recData = allo;
+          update ( recData );
+        }
+        
+        utter ( allo );
+        
+      }
+      break;
+    }
+    
+    if ( getState() == Play ) {
+   
+    ubyte recData;
+    
+    if(update ( recData ) ){
+      
+      if( recData == EndPlayback ) shutup();
+      else {
+        GSAllophone data = ( GSAllophone) recData;
+        utter ( data );
+      }
+    }    
+  }   
+ } 
+  /*byte button = 'q';
+
+  GSAllophone allo = key2allo(button);
+  
+  
+  setState ( Play );
+  
+  if ( getState() == Play ) {
+     ubyte recData;
+      
+      if(update ( recData ) ){
+        
+        if( recData == EndPlayback ) shutup();
+        else {
+          GSAllophone data = ( GSAllophone) recData;
+          utter ( data );
+        }
+      }
+  }*/
+ 
+}
+
+//----------------------------------------------------
+//Convert keystroke to allophone
+//----------------------------------------------------
+
+GSAllophone key2allo(byte key){
+  switch ( key ){
+    case '1' : return _F; break;
+    case '2' : return _I; break;
+    case '3' : return _J; break;
+    case '4' : return _M; break;
+    case '5' : return _R; break;
+    case '6' : return _U; break;
+    case '7' : return _V; break;
+    case '8' : return _W; break;
+    case '9' : return _Y; break;
+    case '0' : return _Z; break;
+    case 'q' : return _AA; break;
+    case 'w' : return _AE; break;
+    case 'e' : return _AU; break;
+    case 'r' : return _BE; break;
+    case 't' : return _BO; break;
+    case 'y' : return _EB; break;
+    case 'u' : return _CH; break;
+    case 'i' : return _DE; break;
+    case 'o' : return _DO; break;
+    case 'p' : return _ED; break;
+    case '[' : return _EE; break;
+    case ']' : return _ER; break;
+    case 'a' : return _GE; break;
+    case 's' : return _GO; break;
+    case 'd' : return _HE; break;
+    case 'f' : return _HO; break;
+    case 'g' : return _IE; break;
+    case 'h' : return _KE; break;
+    case 'j' : return _KO; break;
+    case 'k' : return _OK; break;
+    case 'l' : return _LE; break;
+    case ';' : return _LO; break;
+    case '`'  : return _NE; break;
+    case '#' : return _NO; break;
+    case 'z' : return _NGE; break;
+    case 'x' : return _OE; break;
+    case 'c' : return _OO; break;
+    case 'v' : return _OO; break;
+    case 'b' : return _PE; break;
+    case 'n' : return _PO; break;
+    case 'm' : return _SE; break;
+    case ',' : return _SH; break;
+    case '.' : return _T; break;
+    case '/' : return _TH; break;
+  }
+}
+
+
+
+void shutup ()
+{
+    GSAllophone phrase[] = { _PA0 , _ENDPHRASE };                   
+    
+}
+
+int checkBttns(){
+  int pitchBttn = 9;
+  int recordBttn = 10;
+  int playBttn = 11;
+  
+  pinMode(pitchBttn, INPUT);
+  pinMode(recordBttn, INPUT);
+  pinMode(playBttn, INPUT);
+  
+  if(digitalRead(pitchBttn)==HIGH)
+  {
+    return 9;
+  }
+  else if (digitalRead(recordBttn)==HIGH)
+  {
+    return 10;
+  }
+  else if (digitalRead(playBttn)==HIGH)
+  {
+    return 11;
+  }
+}
+
+
+//----------------------------------------------
+// Record and playback functions
+//--------------------------------------------
+
+
+int curState;//current operating state
+int recPos;//recording position in the buffer
+int recLength;//total recording length
+ubyte recData [ BufferSize ];//recording data buffer
+
+unsigned long playStartTime;//time when playback began
+int curAlloDur;//duration of current playing allophne
+
+//-------------------------------------
+//Begin the record and playback system
+//-------------------------------------
+void beginRec()
+{
+  curState = Stop;
+}
+
+//--------------------------------------
+// setState of record or play
+//--------------------------------------
+
+void setState ( int state )
+{
+  if ( curState == Record ){
+    recLength = recPos;
+  }
+  
+  switch ( state ) {
+      
+      case Play:
+        playStartTime = millis();
+        curAlloDur = 0;
+        break;
+      
+      default: break;
+      
+    }
+    
+    recPos = 0;
+    curState = state;
+  }
+
+int getState () { return (curState); }
+
+//---------------------------------------------
+//Update the record/playback state
+//---------------------------------------------
+
+bool update ( ubyte & data )
+{
+  int retState = true;
+  
+  switch ( curState ) {
+    
+    //in record mode add a new value until full
+    case Record:
+   
+       if ( recPos > BufferSize ) {
+         
+         retState = false;
+         setState ( Stop );
+         retState = false;
+       }
+       
+       else if ( data != NoData ) {
+         
+         recData [ recPos++ ] = data;
+         retState = true;
+       }
+       break;
+       
+     // in play mode delete another value if the previous one has completed
+     
+     case Play :
+     
+     delay ( 100 );
+     
+     if ( recPos <recLength ) {
+       if ( millis() - playStartTime < curAlloDur ){
+         data = NoData; retState = false;
+       }
+       else{
+         data = recData [ recPos++];
+         if ( recPos >= BufferSize ) setState (Stop);
+         curAlloDur = getDuration ( (GSAllophone) data);
+         retState = true;
+       }
+     }
+     else if ( recPos == recLength ) {
+       data = EndPlayback;
+       retState = true;
+       
+       setState (Stop);
+     }
+     break;
+     
+   default : break;
+  }
+  
+  return ( retState );
+}
+
+
+
+void sayBabbleBoard()
+{
+    GSAllophone welcome[] = {_W , _E , _LE , _KE , _U , _M, _PA1, _IE, _PA0, _A , _A , _M, _PA0,_THH , _EE,_PA2,_ENDPHRASE};
+
+    GSAllophone phrase[] = { _BE , _A , _OB , _LE ,_PA1, _BO, _OE, _OR, _DE, _PA0, _ENDPHRASE};
+  
+    //speak ( phrase );
+  
+    GSAllophone shutup[] = { _PA1 , _ENDPHRASE };                        // tell the voice to stop
+    voice->setFrequency( 1000 );
+    voice->speak   ( welcome );
+    voice->speak   ( phrase );                                           // make it stop
+  
+    while ( !GS.isReady() ) delay ( 1 );                                 // wait for all our commands to finish
+    delay ( 1000 );                                                      // ahh, some slience
+    
+}
+
+#define numNotes 22  // musical notes to "sing"
+
+GSNote notes[numNotes] = { C_2, D_2, E_2, F_2, G_2, A_2, B_2, C_3, D_3, E_3, F_3, G_3, A_3, B_3, C_4, D_4, E_4, F_4, G_4, A_4, B_4, C_5 };
+                      
+void warmUpVoice()
+{
+   // run through the scale as fast as we can
+    
+    GSAllophone  phrase[] = { _AA , _ENDPHRASE };                   // this is what we'll say - just a simple vowel (note we must terminate!)
+    
+    for ( int noteIdx = 0; noteIdx < numNotes; noteIdx++ )          // run through the notes
+    {
+      voice->setNote ( (GSNote) notes [ noteIdx ] );                // set a new note for this phrase
+      voice->speak   ( phrase );                                    // start the voice speaking
+      
+      delay ( voice->getMillis( phrase ) );                         // wait for it to complete - if we don't wait we can end up overrunning
+                                                                    // the chip interface ( see GinSing::isReady() for details )
+    }
+
+   GSAllophone shutup[] = { _PA1 , _ENDPHRASE };                    // tell the voice to stop
+   voice->speak   ( shutup );                                       // make it stop
+   
+   while ( !GS.isReady() ) delay ( 1 );                             // wait for all our commands to finish
+     
+   delay ( 1000 );                                                  // ahh, some slience
+   
+}
+
+
+
+   
